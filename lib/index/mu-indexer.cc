@@ -34,6 +34,8 @@ using namespace std::chrono_literals;
 #include <xapian.h>
 
 #include "mu-scanner.hh"
+
+#include <glib.h>
 #include "utils/mu-async-queue.hh"
 #include "utils/mu-error.hh"
 #include "../mu-store.hh"
@@ -116,11 +118,16 @@ Indexer::Private::handler (const std::string& fullpath, struct stat *statbuf,
 {
         switch (htype) {
         case Scanner::HandleType::EnterDir: {
-                // in lazy-mode, we ignore this dir if its dirstamp suggest it
-                // is up-to-date (this is _not_ always true; hence we call it
-                // lazy-mode)
+                // determine whether this is a maildir. Only skip maildirs in lazy-mode.  in
+                // lazy-mode, we ignore this dir if its dirstamp suggest it is up-to-date (this is
+                // _not_ always true; hence we call it lazy-mode)
+                auto basename{g_path_get_basename(fullpath.c_str())};
+                const auto is_maildir = (g_strcmp0(basename, "cur") == 0 ||
+                                         g_strcmp0(basename,"new") == 0);
+                g_free(basename);
+
                 dirstamp_ = store_.dirstamp(fullpath);
-                if (conf_.lazy_check && dirstamp_ == statbuf->st_mtime) {
+                if (conf_.lazy_check && dirstamp_ == statbuf->st_mtime && is_maildir) {
                         g_debug("skip %s (seems up-to-date)", fullpath.c_str());
                         return false;
                 }
