@@ -28,6 +28,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <glib.h>
@@ -50,7 +51,7 @@ struct Scanner::Private {
 
         bool start();
         bool stop();
-        bool process_dentry (const std::string& path, struct dirent *dentry, bool is_maildir);
+        bool process_dentry (const std::string& path, const int fd, struct dirent *dentry, bool is_maildir);
         bool process_dir (const std::string& path, bool is_maildir);
 
         const std::string      root_dir_;
@@ -82,15 +83,16 @@ is_new_cur (const char *dirname)
 }
 
 bool
-Scanner::Private::process_dentry (const std::string& path, struct dirent *dentry,
+Scanner::Private::process_dentry (const std::string& path, const int fd, struct dirent *dentry,
                                   bool is_maildir)
 {
         if (is_special_dir (dentry))
                 return true; // ignore.
 
         const auto fullpath{path + "/" + dentry->d_name};
+
         struct stat statbuf;
-        if (::stat(fullpath.c_str(), &statbuf) != 0) {
+        if (::fstatat(fd, dentry->d_name, &statbuf, 0) != 0) {
                 g_warning ("failed to stat %s: %s", fullpath.c_str(), g_strerror(errno));
                 return false;
         }
@@ -118,7 +120,9 @@ Scanner::Private::process_dentry (const std::string& path, struct dirent *dentry
 bool
 Scanner::Private::process_dir (const std::string& path, bool is_maildir)
 {
-        const auto dir = opendir (path.c_str());
+        const auto dir = opendir(path.c_str());
+        const int fd = open(path.c_str(), O_RDONLY);
+
         if (G_UNLIKELY(!dir)) {
                 g_warning("failed to scan dir %s: %s", path.c_str(), g_strerror(errno));
                 return false;
@@ -132,7 +136,7 @@ Scanner::Private::process_dir (const std::string& path, bool is_maildir)
                 const auto dentry{readdir(dir)};
 
                 if (G_LIKELY(dentry)) {
-                        process_dentry (path, dentry, is_maildir);
+                        process_dentry (path, fd, dentry, is_maildir);
                         continue;
                 }
 
@@ -143,7 +147,9 @@ Scanner::Private::process_dir (const std::string& path, bool is_maildir)
 
                 break;
         }
-        closedir (dir);
+
+        close(fd);
+        closedir(dir);
 
         return true;
 }
